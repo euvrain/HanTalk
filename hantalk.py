@@ -1,48 +1,71 @@
 import streamlit as st
-from openai import OpenAI
+import subprocess
+import re
 
-# Init OpenAI client
-client = OpenAI(api_key="API")
+st.set_page_config(page_title="HanTalk 🦙🇰🇷", layout="centered")
+st.title("🦙 HanTalk — Your Chill Korean Tutor")
 
-st.title("한톡 (HanTalk) - Korean Chat Tutor")
+# Chat history state
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
+# Input box
+user_input = st.text_input("무언가를 한국어로 말해보세요:")
 
-formality = st.radio("Choose your style:", ["존댓말 (Formal)", "반말 (Casual)"])
+def clean_output(text):
+    # Remove terminal color codes
+    return re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', text).strip()
 
+def call_llama(prompt):
+    llama_path = "/Users/taylormcdonald/llama.cpp/build/bin/llama-simple-chat"
+    model_path = "/Users/taylormcdonald/llama.cpp/models/mistral-7b-instruct-v0.1.Q4_0.gguf"
 
-user_input = st.text_input("Say something in Korean:")
-
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if user_input:
-
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-
-    if formality == "존댓말 (Formal)":
-        system_msg = "You are a helpful Korean tutor. Always reply in polite Korean (존댓말). Speak naturally and clearly for learners."
-    else:
-        system_msg = "You are a helpful Korean tutor. Always reply in casual Korean (반말). Be friendly, natural, and use simple grammar."
-
-
-    messages = [{"role": "system", "content": system_msg}] + st.session_state.messages
-
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        temperature=0.7,
+    system_prompt = (
+        "너는 한국어를 알려주는 친절하고 귀여운 튜터야. "
+        "반말만 쓰고, 자연스럽게 말해. "
+        "절대 영어를 쓰지 마. "
+        "모르는 단어나 문장이 있으면 '나도 잘 몰라 ㅎㅎ'라고 말해. "
+        "짧고 간단하게 대답해줘."
     )
 
+    full_prompt = system_prompt + "\n" + prompt + "\n"
 
-    bot_reply = response.choices[0].message.content
+    process = subprocess.Popen(
+        [llama_path, "-m", model_path],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
+    output, _ = process.communicate(input=full_prompt)
 
-    st.session_state.messages.append({"role": "assistant", "content": bot_reply})
+    # Clean terminal color codes
+    cleaned = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', output).strip()
 
-for msg in st.session_state.messages:
-    if msg["role"] == "user":
-        st.markdown(f"**You:** {msg['content']}")
+    # Remove echoed prompt if present
+    if full_prompt in cleaned:
+        cleaned = cleaned.split(full_prompt)[-1].strip()
+
+    # Remove repeated lines
+    lines = cleaned.splitlines()
+    seen = set()
+    deduped = []
+    for line in lines:
+        if line.strip() and line.strip() not in seen:
+            seen.add(line.strip())
+            deduped.append(line.strip())
+
+    return "\n".join(deduped).strip()
+
+if user_input:
+    st.session_state.chat_history.append(("You", user_input))
+    with st.spinner("HanTalk 생각중..."):
+        reply = call_llama(user_input)
+        st.session_state.chat_history.append(("HanTalk", reply))
+
+for speaker, msg in st.session_state.chat_history:
+    if speaker == "You":
+        st.markdown(f"🧑‍💻 **You:** {msg}")
     else:
-        st.markdown(f"**HanTalk:** {msg['content']}")
+        st.markdown(f"🦙 **HanTalk:** {msg}")
